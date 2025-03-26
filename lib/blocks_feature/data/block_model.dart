@@ -1,242 +1,627 @@
-import 'dart:ui';
-import 'package:flutter_application_2/Entity/entity.dart';
-import 'package:flutter_application_2/Entity/entity_manager.dart';
-import 'package:flutter_application_2/result.dart';
-import 'package:freezed_annotation/freezed_annotation.dart';
+// ignore_for_file: public_member_api_docs, sort_constructors_first
+import 'dart:developer';
 
-part 'block_model.freezed.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_application_2/animation_feature/data/animation_controller_component.dart';
+import 'package:flutter_application_2/blocks_feature/presentation/condition_block_widget.dart';
+import 'package:flutter_application_2/blocks_feature/presentation/declare_variable_block_widget.dart';
+import 'package:flutter_application_2/blocks_feature/presentation/if_block_widget.dart';
+import 'package:flutter_application_2/blocks_feature/presentation/move_block_widget.dart';
+import 'package:flutter_application_2/blocks_feature/presentation/play_animation_block_widget.dart';
+import 'package:flutter_application_2/blocks_feature/presentation/variable_reference_block_widget.dart';
+import 'package:provider/provider.dart';
+import 'package:uuid/uuid.dart';
+import 'package:flutter_application_2/Entity/data/entity.dart';
+import 'package:flutter_application_2/blocks_feature/presentation/block_factory.dart';
+import 'package:flutter_application_2/core/result.dart';
 
-enum Source {
-  workSpace,
-  storage,
-}
+abstract class BlockModel with ChangeNotifier {
+  String id;
+  Offset position;
+  Color color;
+  double width;
+  double height;
+  bool isConnected;
+  BlockModel? child;
+  BlockModel? parent;
+  bool isDragTarget;
+  bool isStatement;
+  bool hasExecuted = false;
 
-@freezed
-sealed class BlockModel with _$BlockModel {
-  const BlockModel._();
+  BlockModel(
+      {required this.position,
+      required this.color,
+      required this.width,
+      required this.height,
+      this.isDragTarget = true,
+      this.isConnected = false,
+      this.isStatement = false})
+      : id = const Uuid().v4();
 
-  const factory BlockModel.ifBlock({
-    required Offset position,
-    required Color color,
-    required double width,
-    required double height,
-    @Default(false) bool isConnected,
-    @Default(Source.storage) Source source,
-    BlockModel? child,
-    BlockModel? parent,
-    @Default([]) List<ConditionBlock> conditions,
-    required bool isDragTarget,
-  }) = IfBlock;
-
-  const factory BlockModel.playAnimationBlock({
-    required Offset position,
-    required Color color,
-    required double width,
-    required double height,
-    @Default(false) bool isConnected,
-    @Default(Source.storage) Source source,
-    BlockModel? child,
-    BlockModel? parent,
-    String? trackName,
-    required bool isDragTarget,
-  }) = PlayAnimationBlock;
-
-  const factory BlockModel.conditionBlock({
-    required Offset position,
-    required Color color,
-    required double width,
-    required double height,
-    @Default(false) bool isConnected,
-    @Default(Source.storage) Source source,
-    BlockModel? child,
-    BlockModel? parent,
-    String? firstOperand,
-    String? comparisonOperator,
-    String? secondOperand,
-    required bool isDragTarget,
-  }) = ConditionBlock;
-
-  const factory BlockModel.MoveBlock({
-    required Offset position,
-    required Color color,
-    required double width,
-    required double height,
-    @Default(false) bool isConnected,
-    @Default(Source.storage) Source source,
-    BlockModel? child,
-    BlockModel? parent,
-    @Default(0.0) double x,
-    @Default(0.0) double y,
-    required bool isDragTarget,
-  }) = MoveBlock; 
-
-  BlockModel connectBlock(BlockModel childBlock) {
-    if ((childBlock.position - position).distance < 10) {
-      return childBlock.copyWith(
-          position: position - Offset(position.dx, height),
-          parent: this,
-          isConnected: true,source: Source.workSpace);
-    } else {
-      return this;
-    }
-  }
-
-  BlockModel disconnectBlock() {
-    return copyWithNullable(resetParent: true);
-  }
-
-  BlockModel updatePosition(Offset localOffset) {
-    return copyWith(position: localOffset);
-  }
-
-  BlockModel addToWorkSpace(Offset localOffset) {
-    return copyWith(position: localOffset, source: Source.workSpace);
-  }
-}
-
-extension BlockModelX on BlockModel {
-  Result execute([EntityManager? entityManager,Entity? activeEntity]) {
-    switch (this) {
-      case IfBlock():
-        final block = this as IfBlock;
-        for (var condition in block.conditions) {
-          Result conditionResult = condition.execute(entityManager);
-          if (conditionResult.errorMessage != null) {
-            return Result.failure(errorMessage: conditionResult.errorMessage);
-          }
-          if (conditionResult.result != null && !conditionResult.result!) {
-            return Result.success(result: false);
-          }
-        }
-        block.child?.execute(entityManager);
-        return Result.success(result: true);
-
-      case PlayAnimationBlock():
-        final block = this as PlayAnimationBlock;
-        if (block.trackName == null) {
-          return Result.failure(errorMessage: "No trackName specified");
-        }
-        if (entityManager == null) {
-          return Result.failure(errorMessage: "Entity manager not provided");
-        }if(activeEntity == null){
-          return Result.failure(errorMessage: "active entity not provided");
-        }
-        entityManager.changeTrackNameToBePlayed(activeEntity, block.trackName!);
-        return Result.success(
-            result: "Animation changed to ${block.trackName}");
-
-      case ConditionBlock():
-        final block = this as ConditionBlock;
-        if (block.firstOperand == null ||
-            block.secondOperand == null ||
-            block.comparisonOperator == null) {
-          return Result.failure(errorMessage: "Missing operand or operator");
-        }
-        switch (block.comparisonOperator) {
-          case "==":
-            return Result.success(
-                result: block.firstOperand == block.secondOperand);
-          case ">":
-            double? op1 = double.tryParse(block.firstOperand!);
-            double? op2 = double.tryParse(block.secondOperand!);
-            if (op1 == null || op2 == null) {
-              return Result.failure(errorMessage: "Operands are not numbers");
-            }
-            return Result.success(result: op1 > op2);
-          case "<":
-            double? op1 = double.tryParse(block.firstOperand!);
-            double? op2 = double.tryParse(block.secondOperand!);
-            if (op1 == null || op2 == null) {
-              return Result.failure(errorMessage: "Operands are not numbers");
-            }
-            return Result.success(result: op1 < op2);
-          default:
-            return Result.failure(errorMessage: "Unknown operator");
-        }
-        case MoveBlock():
-          final block = this as MoveBlock;
-          if (entityManager == null) {
-          return Result.failure(errorMessage: "Entity manager not provided");
-        }if(activeEntity == null){
-          return Result.failure(errorMessage: "active entity not provided");
-        }
-          entityManager.moveEntity(activeEntity,x:block.x ,y:block.y);
-          return Result.success(result: "moved by ${block.x} horisontally and by ${block.y} vertically");
-    }
-  }
-}
-
-
-extension BlockModelY on BlockModel {
-  BlockModel copyWithNullable({
+  BlockModel copyWith({
     Offset? position,
     Color? color,
     double? width,
     double? height,
     bool? isConnected,
-    Source? source,
-    bool? isDragTarget,
-    bool resetChild = false, // Flag to explicitly reset child to null
-    bool resetParent = false, // Flag to explicitly reset parent to null
     BlockModel? child,
     BlockModel? parent,
-  }) {
-    switch (this) {
-      case IfBlock():
-        final block = this as IfBlock;
-        return block.copyWith(
-          position: position ?? block.position,
-          color: color ?? block.color,
-          width: width ?? block.width,
-          height: height ?? block.height,
-          isConnected: isConnected ?? block.isConnected,
-          source: source ?? block.source,
-          isDragTarget: isDragTarget ?? block.isDragTarget,
-          child: resetChild ? null : (child ?? block.child),
-          parent: resetParent ? null : (parent ?? block.parent),
-        );
+    bool? isDragTarget,
+  });
 
-      case PlayAnimationBlock():
-        final block = this as PlayAnimationBlock;
-        return block.copyWith(
-          position: position ?? block.position,
-          color: color ?? block.color,
-          width: width ?? block.width,
-          height: height ?? block.height,
-          isConnected: isConnected ?? block.isConnected,
-          source: source ?? block.source,
-          isDragTarget: isDragTarget ?? block.isDragTarget,
-          child: resetChild ? null : (child ?? block.child),
-          parent: resetParent ? null : (parent ?? block.parent),
-        );
+  void connectBlock(BlockModel childBlock) {
+    child = childBlock;
+    childBlock.parent = this;
+    isConnected = true;
+    childBlock.isConnected = true;
+    notifyListeners();
+  }
 
-      case ConditionBlock():
-        final block = this as ConditionBlock;
-        return block.copyWith(
-          position: position ?? block.position,
-          color: color ?? block.color,
-          width: width ?? block.width,
-          height: height ?? block.height,
-          isConnected: isConnected ?? block.isConnected,
-          source: source ?? block.source,
-          isDragTarget: isDragTarget ?? block.isDragTarget,
-          child: resetChild ? null : (child ?? block.child),
-          parent: resetParent ? null : (parent ?? block.parent),
-        );
-
-      case MoveBlock():
-        final block = this as MoveBlock;
-        return block.copyWith(
-          position: position ?? block.position,
-          color: color ?? block.color,
-          width: width ?? block.width,
-          height: height ?? block.height,
-          isConnected: isConnected ?? block.isConnected,
-          source: source ?? block.source,
-          isDragTarget: isDragTarget ?? block.isDragTarget,
-          child: resetChild ? null : (child ?? block.child),
-          parent: resetParent ? null : (parent ?? block.parent),
-        );
+  void disconnectBlock() {
+    if (parent != null) {
+      parent!.child = null;
+      parent!.isConnected = false;
+      parent = null;
     }
+    isConnected = false;
+    notifyListeners();
+  }
+
+  void updatePosition(Offset newPosition) {
+    position = newPosition;
+    notifyListeners();
+  }
+
+  Result execute([Entity? activeEntity]);
+
+  Widget buildBlock();
+
+  void setWidth(double width) {
+    this.width = width;
+    notifyListeners();
+  }
+
+  void setHeight(double height) {
+    this.height = height;
+    notifyListeners();
+  }
+
+  void setIsStatement(bool isStatement) {
+    this.isStatement = isStatement;
+    notifyListeners();
+  }
+}
+
+class StartBlock extends BlockModel {
+  StartBlock(
+      {required super.position,
+      required super.color,
+      required super.width,
+      required super.height});
+
+  @override
+  BlockModel copyWith(
+      {Offset? position,
+      Color? color,
+      double? width,
+      double? height,
+      bool? isConnected,
+      BlockModel? child,
+      BlockModel? parent,
+      bool? isDragTarget}) {
+    return StartBlock(
+      position: position ?? this.position,
+      color: color ?? this.color,
+      width: width ?? this.width,
+      height: height ?? this.height,
+    );
+  }
+
+  @override
+  Result<String> execute([Entity? activeEntity]) {
+    return Result.success(result: "I'm just a cute starting block");
+  }
+
+  @override
+  Widget buildBlock() {
+    return StartBlockWidget(blockModel: this);
+  }
+}
+
+class IfBlock extends BlockModel {
+  List<ConditionBlock> conditions = [];
+  List<BlockModel> statements = [];
+  IfBlock({
+    required super.position,
+    required super.color,
+    required super.width,
+    required super.height,
+    super.isDragTarget,
+  });
+
+  @override
+  IfBlock copyWith({
+    Offset? position,
+    Color? color,
+    double? width,
+    double? height,
+    bool? isConnected,
+    BlockModel? child,
+    BlockModel? parent,
+    bool? isDragTarget,
+    List<ConditionBlock>? conditions,
+    List<BlockModel>? statements,
+  }) {
+    return IfBlock(
+      position: position ?? this.position,
+      color: color ?? this.color,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      isDragTarget: isDragTarget ?? this.isDragTarget,
+    )
+      ..isConnected = isConnected ?? this.isConnected
+      ..child = child ?? this.child
+      ..parent = parent ?? this.parent;
+  }
+
+  @override
+  Result<bool> execute([Entity? activeEntity]) {
+    for (var condition in conditions) {
+      Result conditionResult = condition.execute(activeEntity);
+      if (conditionResult.errorMessage != null) {
+        return Result.failure(errorMessage: conditionResult.errorMessage);
+      }
+      if (conditionResult.result != null && !conditionResult.result!) {
+        log("false condition");
+        return Result.success(result: false);
+
+      }
+    }
+
+    for (var statement in statements) {
+      log("executing statement ${statement.runtimeType}");
+      Result statementResult = statement.execute(activeEntity);
+      if (statementResult.errorMessage != null) {
+        return Result.failure(errorMessage: statementResult.errorMessage);
+      }
+    }
+    return Result.success(result: true);
+  }
+
+  void addConidition(ConditionBlock condition) {
+    conditions.add(condition);
+    notifyListeners();
+  }
+
+  void addStatement(BlockModel statement) {
+    statements.add(statement);
+    notifyListeners();
+  }
+
+  void removeStatement({required BlockModel statement}) {
+    statements.remove(statement);
+    notifyListeners();
+  }
+
+  void removeCondition({required ConditionBlock condition}) {
+    conditions.remove(condition);
+    notifyListeners();
+  }
+
+  @override
+  Widget buildBlock() {
+    return ChangeNotifierProvider.value(
+        value: this, child: IfBlockWidget(blockModel: this));
+  }
+}
+
+class PlayAnimationBlock extends BlockModel {
+  String? trackName;
+
+  PlayAnimationBlock({
+    required super.position,
+    required super.color,
+    required super.width,
+    required super.height,
+    super.isDragTarget,
+    this.trackName,
+  });
+
+  @override
+  PlayAnimationBlock copyWith({
+    Offset? position,
+    Color? color,
+    double? width,
+    double? height,
+    bool? isConnected,
+    BlockModel? child,
+    BlockModel? parent,
+    bool? isDragTarget,
+    String? trackName,
+  }) {
+    return PlayAnimationBlock(
+      position: position ?? this.position,
+      color: color ?? this.color,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      isDragTarget: isDragTarget ?? this.isDragTarget,
+      trackName: trackName ?? this.trackName,
+    )
+      ..isConnected = isConnected ?? this.isConnected
+      ..child = child ?? this.child
+      ..parent = parent ?? this.parent;
+  }
+
+  void setTrackName(String trackName) {
+    this.trackName = trackName;
+    notifyListeners();
+  }
+
+  
+
+  @override
+  Result execute([Entity? activeEntity]) {
+    if (hasExecuted) {
+      log("block playanimation has already been executed");
+      return Result.failure(errorMessage: "Block has already executed");
+    }
+    // First, validate the inputs
+    if (trackName == null) {
+      return Result.failure(errorMessage: "No trackName specified");
+    }
+
+    if (activeEntity == null) {
+      return Result.failure(errorMessage: "Active entity not provided");
+    }
+
+    AnimationControllerComponent? animComponent =
+        activeEntity.getComponent<AnimationControllerComponent>();
+
+    if (animComponent != null) {
+      if (animComponent.animationTracks.containsKey(trackName!)) {
+        animComponent.setTrack(trackName!);
+        hasExecuted = true;
+        return Result.success(result: "Animation changed to $trackName");
+      } else {
+        return Result.failure(
+            errorMessage: "Animation track '$trackName' does not exist");
+      }
+    } else {
+      return Result.failure(
+          errorMessage: "Entity does not have an AnimationControllerComponent");
+    }
+  }
+
+  @override
+  Widget buildBlock() {
+    return ChangeNotifierProvider.value(
+      value: this,
+      child: PlayAnimationBlockWidget(blockModel: this),
+    );
+  }
+}
+
+class ConditionBlock extends BlockModel {
+  dynamic firstOperand;
+  dynamic secondOperand;
+  dynamic comparisonOperator;
+
+  ConditionBlock({
+    required super.position,
+    required super.color,
+    required super.width,
+    required super.height,
+    super.isDragTarget,
+    this.firstOperand,
+    this.secondOperand,
+    this.comparisonOperator,
+  });
+
+  @override
+  ConditionBlock copyWith({
+    Offset? position,
+    Color? color,
+    double? width,
+    double? height,
+    bool? isConnected,
+    BlockModel? child,
+    BlockModel? parent,
+    bool? isDragTarget,
+    String? firstOperand,
+    String? secondOperand,
+    String? comparisonOperator,
+  }) {
+    return ConditionBlock(
+      position: position ?? this.position,
+      color: color ?? this.color,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      isDragTarget: isDragTarget ?? this.isDragTarget,
+      firstOperand: firstOperand ?? this.firstOperand,
+      secondOperand: secondOperand ?? this.secondOperand,
+      comparisonOperator: comparisonOperator ?? this.comparisonOperator,
+    )
+      ..isConnected = isConnected ?? this.isConnected
+      ..child = child ?? this.child
+      ..parent = parent ?? this.parent;
+  }
+
+  @override
+  Result execute([Entity? activeEntity]) {
+    double? op1;
+    double? op2;
+    if (firstOperand == null ||
+        secondOperand == null ||
+        comparisonOperator == null) {
+      return Result.failure(errorMessage: "Missing operand or operator");
+    }
+
+    if (activeEntity!.variables.containsKey(firstOperand)) {
+      op1 = activeEntity.variables[firstOperand];
+    }
+    if (activeEntity.variables.containsKey(secondOperand)) {
+      secondOperand = activeEntity.variables[secondOperand];
+    }
+    switch (comparisonOperator) {
+      case "==":
+     
+        if (firstOperand is String) {
+          op1 = double.tryParse(firstOperand!);
+        }
+      if (secondOperand is String) {
+          op2 = double.tryParse(secondOperand!);
+        }
+        return Result.success(result: firstOperand == secondOperand || op1 == op2 || firstOperand == op2 || op1 == secondOperand);
+      case ">":
+        if (secondOperand is String) {
+          op2 = double.tryParse(secondOperand!);
+        }
+        return Result.success(result: op1! > op2!);
+      case "<":
+        double? op1 = double.tryParse(firstOperand!);
+        double? op2 = double.tryParse(secondOperand!);
+        if (op1 == null || op2 == null) {
+          return Result.failure(errorMessage: "Operands are not numbers");
+        }
+        return Result.success(result: op1 < op2);
+      default:
+        return Result.failure(errorMessage: "Unknown operator");
+    }
+  }
+
+  @override
+  Widget buildBlock() {
+    return ChangeNotifierProvider.value(
+      value: this,
+      child: ConditionBlockWidget(blockModel: this),
+    );
+  }
+
+  void setFirstOperand(double value) {
+    firstOperand = value.toString();
+    notifyListeners();
+  }
+
+  void setSecondOperand(double value) {
+    secondOperand = value.toString();
+    notifyListeners();
+  }
+
+  void setFirstOperandAsString(String value) {
+    firstOperand = value;
+    notifyListeners();
+  }
+
+  void setSecondOperandAsString(String value) {
+    secondOperand = value;
+    notifyListeners();
+  }
+
+  void setComparisonOperator(String value) {
+    comparisonOperator = value;
+    notifyListeners();
+  }
+}
+
+class MoveBlock extends BlockModel {
+  double x;
+  double y;
+
+  MoveBlock({
+    required super.position,
+    required super.color,
+    required super.width,
+    required super.height,
+    super.isDragTarget,
+    this.x = 0.0,
+    this.y = 0.0,
+  });
+
+  @override
+  MoveBlock copyWith({
+    Offset? position,
+    Color? color,
+    double? width,
+    double? height,
+    bool? isConnected,
+    BlockModel? child,
+    BlockModel? parent,
+    bool? isDragTarget,
+    double? x,
+    double? y,
+  }) {
+    return MoveBlock(
+      position: position ?? this.position,
+      color: color ?? this.color,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      isDragTarget: isDragTarget ?? this.isDragTarget,
+      x: x ?? this.x,
+      y: y ?? this.y,
+    )
+      ..isConnected = isConnected ?? this.isConnected
+      ..child = child ?? this.child
+      ..parent = parent ?? this.parent;
+  }
+
+  @override
+  Result<String> execute([Entity? activeEntity]) {
+    if (activeEntity == null) {
+      return Result.failure(errorMessage: "Active entity not provided");
+    }
+    activeEntity.move(x: x, y: y);
+    return Result.success(
+        result: "Moved by $x horizontally and by $y vertically");
+  }
+
+  void setXvalue(double x) {
+    this.x = x;
+    notifyListeners();
+  }
+
+  void setYvalue(double y) {
+    this.y = y;
+    notifyListeners();
+  }
+
+  @override
+  Widget buildBlock() {
+    return ChangeNotifierProvider.value(
+      value: this,
+      child: MoveBlockWidget(blockModel: this),
+    );
+  }
+}
+
+class DeclareVarableBlock extends BlockModel {
+  String variableName;
+  dynamic value;
+  DeclareVarableBlock(
+      {required this.value,
+      this.variableName = "x",
+      required super.position,
+      required super.color,
+      required super.width,
+      required super.height,
+      super.isDragTarget = true});
+
+  @override
+  Widget buildBlock() {
+    return ChangeNotifierProvider.value(
+        value: this, child: DeclareVariableBlockWidget(blockModel: this));
+  }
+
+  void setVariableName(String variableName) {
+    this.variableName = variableName;
+    notifyListeners();
+  }
+
+  void setVariableValue(dynamic value) {
+    this.value = value;
+    notifyListeners();
+  }
+
+  @override
+  DeclareVarableBlock copyWith(
+      {Offset? position,
+      Color? color,
+      double? width,
+      double? height,
+      bool? isConnected,
+      BlockModel? child,
+      BlockModel? parent,
+      bool? isDragTarget,
+      String? variableName,
+      dynamic value}) {
+    return DeclareVarableBlock(
+        position: position ?? this.position,
+        color: color ?? this.color,
+        width: width ?? this.width,
+        height: height ?? this.height,
+        isDragTarget: isDragTarget ?? this.isDragTarget,
+        variableName: variableName ?? this.variableName,
+        value: value ?? this.value)
+      ..isConnected = isConnected ?? this.isConnected
+      ..child = child ?? this.child
+      ..parent = parent ?? this.parent;
+  }
+
+  @override
+  Result execute([Entity? activeEntity]) {
+    if (activeEntity!.variables.containsKey(variableName)) {
+      return Result.failure(
+          errorMessage:
+              "variable $variableName already declared in this scope");
+    }
+
+    activeEntity.addVariable(name: variableName, value: value);
+    return Result.success(result: "variable $variableName was declared");
+  }
+}
+
+class VariableReferenceBlock extends BlockModel {
+  String variableName;
+
+  VariableReferenceBlock(
+      {this.variableName = "",
+      required super.position,
+      required super.color,
+      required super.width,
+      required super.height,
+      super.isDragTarget = true});
+
+  @override
+  Widget buildBlock() {
+    return ChangeNotifierProvider.value(
+        value: this, child: VariableReferenceBlockWidget(blockModel: this));
+  }
+
+  void setVariableName(String variableName) {
+    this.variableName = variableName;
+    notifyListeners();
+  }
+
+  @override
+  VariableReferenceBlock copyWith({
+    Offset? position,
+    Color? color,
+    double? width,
+    double? height,
+    bool? isConnected,
+    BlockModel? child,
+    BlockModel? parent,
+    bool? isDragTarget,
+    String? variableName,
+  }) {
+    return VariableReferenceBlock(
+      position: position ?? this.position,
+      color: color ?? this.color,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      isDragTarget: isDragTarget ?? this.isDragTarget,
+      variableName: variableName ?? this.variableName,
+    )
+      ..isConnected = isConnected ?? this.isConnected
+      ..child = child ?? this.child
+      ..parent = parent ?? this.parent;
+  }
+
+  @override
+  Result execute([Entity? activeEntity]) {
+    if (activeEntity == null) {
+      return Result.failure(
+          errorMessage: "No active entity to get variable from");
+    }
+
+    if (variableName.isEmpty) {
+      return Result.failure(errorMessage: "Variable name is empty");
+    }
+
+    if (!activeEntity.variables.containsKey(variableName)) {
+      return Result.failure(
+          errorMessage: "Variable '$variableName' does not exist");
+    }
+
+    return Result.success(result: activeEntity.variables[variableName]);
   }
 }

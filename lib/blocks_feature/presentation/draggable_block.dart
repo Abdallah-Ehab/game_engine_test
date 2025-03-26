@@ -1,66 +1,78 @@
+import 'dart:developer';
 
-import 'package:flutter/widgets.dart';
-import 'package:flutter_application_2/active_entity.dart';
-import 'package:flutter_application_2/block_component.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_application_2/blocks_feature/data/block_model.dart';
-import 'package:flutter_application_2/blocks_feature/presentation/block_widget.dart';
-import 'package:flutter_application_2/blocks_feature/domain/draggable_block_provider.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_application_2/blocks_feature/domain/dragged_block_provider.dart';
+import 'package:flutter_application_2/blocks_feature/presentation/block_factory.dart';
+import 'package:provider/provider.dart';
 
-class DraggableBlock extends ConsumerWidget {
+class DraggableBlock extends StatelessWidget {
   final BlockModel blockModel;
-  const DraggableBlock({super.key, required this.blockModel});
+  final void Function()? removeStatement;
+  final void Function()? removeCondition;
+  const DraggableBlock({super.key, required this.blockModel,this.removeStatement,this.removeCondition});
 
   @override
-  Widget build(BuildContext context,WidgetRef ref) {
-    var activeEntity = ref.watch(activeEntityProvider);
-    var blockComponent = activeEntity.getComponent<BlockComponent>();
+  Widget build(BuildContext context) {
     return blockModel.isDragTarget
         ? DragTarget<BlockModel>(
             builder: (context, accepted, denied) {
-              return _buildDraggableBlock(blockModel,ref);
+              return Draggable(
+                  data: blockModel,
+                  feedback: Transform.scale(
+                    scale: 1.09,
+                    child: BlockFactory(blockModel: blockModel),
+                  ),
+                  child: BlockFactory(blockModel: blockModel),
+                  onDragStarted: () {
+                    if(blockModel.isStatement && removeStatement != null){
+                      removeStatement!();
+                    }
+                    if(blockModel is ConditionBlock && removeCondition != null){
+                      removeCondition!();
+                    }
+                  if(blockModel.isConnected){
+                    blockModel.disconnectBlock();
+                    log("block $blockModel was disconnected");
+                    blockModel.hasExecuted = false;
+                  }
+                  if(Scaffold.of(context).isDrawerOpen) {
+                    Scaffold.of(context).closeDrawer();
+                  }
+                  },
+                  
+                  // onDragUpdate: (details) {
+                  //   blockModel.updatePosition(details.globalPosition);
+                  //   if(blockModel.child != null){
+                  //     blockModel.child!.updatePosition(blockModel.position + Offset(0, blockModel.height));
+                  //   }
+                  // },
+                  );
+                  
             },
-            onAcceptWithDetails: (details){
-              var draggedBlock = ref.watch(draggedBlockProvider);
-              details.data.connectBlock(draggedBlock!);
-              if(blockComponent != null){
-                blockComponent.removeBlockFromWorkSpace(draggedBlock);
+            onAcceptWithDetails: (details) {
+              log("${details.data}");
+              log("$blockModel");
+
+              if (blockModel.id != details.data.id) {
+                details.data.updatePosition(
+                    blockModel.position + Offset(0, blockModel.height));
+                blockModel.connectBlock(details.data);
+                log("block ${details.data} is connected to block $blockModel");
               }
             },
           )
-        : _buildDraggableBlock(blockModel,ref);
+        : Draggable(
+            data: blockModel,
+            feedback: BlockFactory(blockModel: blockModel),
+            onDragUpdate: (details) {
+              blockModel.updatePosition(details.localPosition);
+            },
+            onDragStarted: () {
+              Provider.of<DraggedBlockNotifier>(context,listen: false).draggedBLock =
+                  blockModel;
+            },
+            child: BlockFactory(blockModel: blockModel),
+          );
   }
 }
-
-Widget _buildDraggableBlock(BlockModel blockModel,WidgetRef ref) {
-  return Draggable<BlockModel>(
-    data: blockModel,
-    feedback:  BlockWidget(blockModel: blockModel,),
-    childWhenDragging:  BlockWidget(blockModel: blockModel,),
-    child:  BlockWidget(blockModel: blockModel,),
-    onDragStarted: () {
-      ref.read(draggedBlockProvider.notifier).setDraggedBlock(blockModel);
-      var draggedBlock = ref.watch(draggedBlockProvider);
-      if (draggedBlock!.isConnected) {
-        draggedBlock.disconnectBlock();
-      }
-    },
-    onDragUpdate: (details) {
-      var draggedBlock = ref.watch(draggedBlockProvider);
-      draggedBlock!.updatePosition(details.localPosition);
-    },
-  );
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
